@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raya</title>
+<style>
+:root{--bg:#0b1020;--card:#151c33;--txt:#e8ecff;--acc:#4de1ff;--mut:#8791b8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--card)}
+h1{margin:0;font-size:20px;color:var(--acc);letter-spacing:2px}
+button{background:var(--acc);color:#001;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
+button.g{background:#252e50;color:var(--txt)}
+#log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:85%;padding:10px 14px;border-radius:14px;white-space:pre-wrap;line-height:1.45}
+.u{align-self:flex-end;background:#25407a}.r{align-self:flex-start;background:var(--card)}
+#bar{display:flex;gap:8px;padding:10px;background:var(--card)}
+#t{flex:1;padding:10px;border-radius:10px;border:0;background:#0b1020;color:var(--txt)}
+dialog{background:var(--card);color:var(--txt);border:0;border-radius:14px;max-width:420px;width:92%}
+dialog input,dialog select{width:100%;margin:4px 0 12px;padding:8px;border-radius:8px;border:0;background:#0b1020;color:var(--txt)}
+small{color:var(--mut)}
+#al{font-size:13px;color:var(--mut);padding:4px 16px}
+</style>
+</head>
+<body>
+<header><h1>RAYA</h1><div><button class="g" id="wk">Hey Raya: OFF</button> <button class="g" onclick="s.showModal()">Settings</button></div></header>
+<div id="al"></div>
+<div id="log"></div>
+<div id="bar"><input id="t" placeholder="Type or tap the mic..."><button id="mic">🎤</button><button id="go">Send</button></div>
+
+<dialog id="s"><h3>Settings</h3>
+<small>Free Gemini key: aistudio.google.com/apikey (stays only in your browser)</small>
+<input id="key" placeholder="Gemini API key" type="password">
+<input id="model" placeholder="Model" value="gemini-2.5-flash">
+<select id="lang"><option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option><option value="bn-IN">Bengali</option></select>
+<input id="prof" placeholder="About you / exam goals (optional)" value="Student preparing for CBI, SSC CGL, ACF, SI West Bengal">
+<button onclick="save()">Save</button> <button class="g" onclick="s.close()">Close</button></dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+const get=(k,d)=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
+const put=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+let hist=JSON.parse(get('hist','[]')),alarms=JSON.parse(get('alarms','[]'));
+$('key').value=get('key','');$('model').value=get('model','gemini-2.5-flash');$('lang').value=get('lang','en-IN');$('prof').value=get('prof',$('prof').value);
+
+function save(){put('key',$('key').value.trim());put('model',$('model').value.trim());put('lang',$('lang').value);put('prof',$('prof').value);s.close()}
+function add(c,t){const d=document.createElement('div');d.className='m '+c;d.textContent=t;$('log').appendChild(d);$('log').scrollTop=1e9}
+function speak(t){if(!speechSynthesis)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t.replace(/[*#_`]/g,''));u.lang=get('lang','en-IN');speechSynthesis.speak(u)}
+function beep(){try{const a=new AudioContext(),o=a.createOscillator();o.connect(a.destination);o.frequency.value=880;o.start();setTimeout(()=>o.stop(),1500)}catch(e){}}
+
+function sysPrompt(){const n=new Date();return `You are RAYA, a friendly Jarvis-like voice assistant for a 17-year-old Indian student. Profile: ${get('prof','')}.
+Now: ${n.toString()}.
+You help with: (1) study notes, PPT outlines, summaries, daily practice papers (MCQs with answers) for SSC CGL, CBI, ACF, West Bengal SI; daily study routines. (2) zero-investment money ideas (e-books, YouTube Shorts, freelancing, skills) and saving toward a bike in 2 years; for investing explain basics, risks and options legal for a minor (with a parent/guardian), never promise returns, you are not a financial advisor. (3) latest news - use search and be accurate, say if unsure. (4) planning the day.
+Keep spoken replies short and clear; use simple language. Reply in the user's language.
+To set an alarm/reminder, include on its own line exactly: [[ALARM|HH:MM|label]] using 24h time, plus [[DATE|YYYY-MM-DD]] only if not today.`}
+
+async function ask(q){
+  const key=get('key','');if(!key){s.showModal();return}
+  add('u',q);hist.push({role:'user',parts:[{text:q}]});
+  const body=tools=>JSON.stringify({systemInstruction:{parts:[{text:sysPrompt()}]},contents:hist.slice(-16),...(tools?{tools:[{google_search:{}}]}:{})});
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${get('model','gemini-2.5-flash')}:generateContent?key=${key}`;
+  try{
+    let r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body(true)});
+    if(!r.ok)r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body(false)});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.error?.message||r.status);
+    let t=(j.candidates[0].content.parts||[]).map(p=>p.text||'').join('');
+    hist.push({role:'model',parts:[{text:t}]});put('hist',JSON.stringify(hist.slice(-30)));
+    const dm=t.match(/\[\[DATE\|([\d-]+)\]\]/);
+    for(const m of t.matchAll(/\[\[ALARM\|(\d\d:\d\d)\|([^\]]*)\]\]/g)){
+      const d=new Date(),[h,mi]=m[1].split(':');d.setHours(+h,+mi,0,0);
+      if(dm){const x=new Date(dm[1]);d.setFullYear(x.getFullYear(),x.getMonth(),x.getDate())}else if(d<new Date())d.setDate(d.getDate()+1);
+      alarms.push({at:d.getTime(),label:m[2]});if(window.Android)Android.alarm(d.getTime(),m[2]);
+    }
+    put('alarms',JSON.stringify(alarms));showAl();
+    t=t.replace(/\[\[[^\]]*\]\]/g,'').trim();
+    add('r',t);speak(t);
+  }catch(e){add('r','Error: '+e.message)}
+}
+function showAl(){$('al').textContent=alarms.length?'⏰ '+alarms.map(a=>new Date(a.at).toLocaleString()+' '+a.label).join(' | '):''}
+setInterval(()=>{const n=Date.now();const due=alarms.filter(a=>a.at<=n);if(!due.length)return;
+  alarms=alarms.filter(a=>a.at>n);put('alarms',JSON.stringify(alarms));showAl();
+  due.forEach(a=>{beep();speak('Reminder: '+a.label);add('r','⏰ '+a.label);
+    try{if(Notification.permission==='granted')new Notification('Raya',{body:a.label})}catch(e){}})},5000);
+try{Notification.requestPermission()}catch(e){}
+
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec,wake=false;
+let nativeOnce=false;
+window.nativeResult=t=>{if(speechSynthesis.speaking)return;
+  if(nativeOnce)ask(t);else if(/raya|raja|rhea/i.test(t)){const q=t.replace(/^.*?(hey |hi |ok )?(raya|raja|rhea)[,.]?\s*/i,'');q?ask(q):speak('Yes?')}};
+function listen(once){
+  if(window.Android){nativeOnce=once;if(!once)Android.keepAlive();Android.listen(!once,get('lang','en-IN'));return}
+  if(!SR){add('r','Voice input needs Chrome or Edge.');return}
+  rec=new SR();rec.lang=get('lang','en-IN');rec.continuous=!once;
+  rec.onresult=e=>{if(speechSynthesis.speaking)return;const t=e.results[e.results.length-1][0].transcript.trim();
+    if(once)ask(t);else if(/raya|raja|rhea/i.test(t)){const q=t.replace(/^.*?(hey |hi |ok )?(raya|raja|rhea)[,.]?\s*/i,'');q?ask(q):speak('Yes?')}};
+  rec.onend=()=>{if(wake&&!once)try{rec.start()}catch(e){}};
+  try{rec.start()}catch(e){}
+}
+$('mic').onclick=()=>listen(true);
+let lock;async function keepAwake(){try{lock=await navigator.wakeLock.request('screen')}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(wake&&document.visibilityState==='visible')keepAwake()});
+function setWake(on){wake=on;put('wake',on?'1':'0');$('wk').textContent='Hey Raya: '+(on?'ON':'OFF');
+  if(on){listen(false);keepAwake()}else{window.Android&&Android.stop();rec&&rec.stop();lock&&lock.release()}}
+$('wk').onclick=e=>{e.stopPropagation();setWake(!wake)};
+if(get('wake','0')==='1'){add('r','Tap anywhere once to start listening for "Hey Raya".');
+  document.body.addEventListener('click',()=>{if(!wake)setWake(true)},{once:true})}
+$('go').onclick=()=>{const v=$('t').value.trim();if(v){$('t').value='';ask(v)}};
+$('t').onkeydown=e=>{if(e.key==='Enter')$('go').click()};
+add('r','Hi, I am Raya. Ask me for notes, a practice paper, a study routine, money ideas or news. Say "set alarm for 5:30 AM" and I will remind you.');showAl();
+</script>
+</body>
+</html>
